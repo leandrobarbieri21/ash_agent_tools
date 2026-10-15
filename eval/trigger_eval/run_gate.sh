@@ -137,12 +137,12 @@ run_one() {
   for _ in $(seq 1 "$RUNS"); do
     r="$(judge "$query")"
     [[ -n "$r" ]] || r="none (judge produced no parseable answer)"
-    printf '%s\x1f%s\x1f%s\x1f%s\x1f%s\n' "$query" "$should" "$exp" "$r" "$also"
+    printf '%s\x1f%s\x1f%s\x1f%s\x1f%s\x1f%s\n' "$query" "$should" "$exp" "$r" "$also" "$neighbor"
   done
 }
 
 while IFS= read -r q_json; do
-  while IFS=$'\x1f' read -r query should exp picked also; do
+  while IFS=$'\x1f' read -r query should exp picked also neighbor; do
     [[ -z "${query:-}" ]] && continue
     [[ -n "$picked" ]] || picked="none (empty pick)"
     row_status=PASS row_label="-"
