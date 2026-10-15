@@ -584,11 +584,20 @@ pattern's certainty — judge context (the compile-time-constant
 
 ## Integration posture
 
-- Two ways in, one facade: plain functions and Mix tasks (evaluate in-VM
-  or run from a shell), or the MCP daemon (`mix ash_agent.serve`), which
-  compiles the project and never starts it. Pick the daemon when an MCP
-  client should call the tools directly; pick the functions when you are
-  already attached to a node.
+- Three ways in, one facade: plain functions and Mix tasks (evaluate
+  in-VM or run from a shell); the MCP daemon (`mix ash_agent.serve`),
+  which compiles the project and never starts it; or, with the optional
+  `ash_ai` dependency, `AshAgentTools.AshAi` mounted on ash_ai's MCP router
+  in a dev-only route. Pick the daemon when an MCP client should call the
+  tools without the app running; pick ash_ai when the app is running and
+  you want one MCP server; pick the functions when you are already
+  attached to a node.
+- The ash_ai adapter serves `ash_describe`, `ash_validate`, `ash_can`,
+  `ash_forbidden`, `ash_context` and `ash_search` with the daemon's names,
+  cards, results and errors. ash_ai wraps the arguments in an `input`
+  object. Inside the app, `ash_can` reads the actor record from your dev
+  data (it never runs the action), and every action refuses when `Mix` is
+  not loaded.
 - The boundary: dev-time, read-only introspection of the framework
   contract. Nothing here exposes the application's own actions at
   runtime — that is ash_ai's production MCP server.
