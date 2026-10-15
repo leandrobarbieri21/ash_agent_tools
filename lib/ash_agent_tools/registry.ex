@@ -13,17 +13,23 @@ defmodule AshAgentTools.Registry do
   about compiled-but-never-loaded modules.
   """
 
+  # This package's own ash_ai adapter is tooling, not part of the host
+  # application, so discovery leaves it out.
+  @own_modules [AshAgentTools.AshAi, AshAgentTools.AshAi.Tools]
+
   @doc """
   All currently loaded modules whose Spark DSL identity is `Ash.Domain`.
   """
   @spec list_domains() :: [module()]
-  def list_domains, do: loaded_modules_matching(&(&1.spark_is() == Ash.Domain))
+  def list_domains,
+    do: loaded_modules_matching(&(&1.spark_is() == Ash.Domain and &1 not in @own_modules))
 
   @doc """
   All currently loaded modules whose Spark DSL identity is `Ash.Resource`.
   """
   @spec list_resources() :: [module()]
-  def list_resources, do: loaded_modules_matching(&(&1.spark_is() == Ash.Resource))
+  def list_resources,
+    do: loaded_modules_matching(&(&1.spark_is() == Ash.Resource and &1 not in @own_modules))
 
   @doc """
   The loaded Ash domains that list the given resource.

@@ -33,11 +33,6 @@ config :ash_agent_tools, AshAgentTools.TestRepo,
 # `mix igniter.install ash_postgres` writes.
 config :ash, disable_async?: true
 
-# With ash_postgres on the dependency graph, Ash requires an explicit string
-# length count (it is what SQL data layers count). Codepoints is the
-# recommended setting.
-config :ash, default_string_length_count: :codepoints
-
 # This package's test domains are fixtures for introspection, not application
 # domains: none of them is meant to land in `config :ash_agent_tools,
 # :ash_domains`, which is the host's declaration. Ash's inclusion validation

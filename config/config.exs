@@ -2,10 +2,15 @@
 #
 # SPDX-License-Identifier: MIT
 
-# Test-only configuration: the sandboxed TestRepo behind the BPMN/decision
-# tooling tests (see test/support/test_repo.ex). This package ships no
-# runtime configuration of its own.
+# This repository's own configuration. Host applications never read it:
+# config of a dependency does not apply to its host. Test-only settings
+# (the sandboxed TestRepo behind the BPMN/decision tests) live in test.exs.
 import Config
+
+# Ash requires an explicit string length count once a resource declares a
+# :string field; the ash_ai adapter's tool arguments do, in every env.
+# Codepoints is the recommended setting (and what SQL data layers count).
+config :ash, default_string_length_count: :codepoints
 
 if config_env() == :test do
   import_config "test.exs"
