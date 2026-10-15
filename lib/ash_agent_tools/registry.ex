@@ -46,6 +46,28 @@ defmodule AshAgentTools.Registry do
   end
 
   @doc """
+  Loads the domains an application declares (`config :my_app, ash_domains:
+  [...]`) and the resources they list. Modules load lazily, and discovery
+  only sees loaded ones; this makes the declared surface visible. Never
+  raises; an unknown or non-domain entry is skipped.
+  """
+  @spec load_app_domains(atom() | nil) :: :ok
+  def load_app_domains(nil), do: :ok
+
+  def load_app_domains(app) when is_atom(app) do
+    for domain <- Application.get_env(app, :ash_domains, []) do
+      with {:module, domain} <- Code.ensure_loaded(domain),
+           true <- function_exported?(domain, :spark_is, 0) do
+        Enum.each(Ash.Domain.Info.resources(domain), &Code.ensure_loaded/1)
+      else
+        _ -> :ok
+      end
+    end
+
+    :ok
+  end
+
+  @doc """
   Renders a module as a string without emitting the `Elixir.` prefix.
   """
   @spec module_name(module()) :: String.t()

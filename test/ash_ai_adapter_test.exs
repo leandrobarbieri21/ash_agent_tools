@@ -162,6 +162,26 @@ defmodule AshAgentTools.AshAiAdapterTest do
     end
   end
 
+  describe "inside a running app" do
+    test "the router's otp_app reaches the action, and its domains get loaded" do
+      Application.put_env(:ash_agent_tools_adapter_probe, :ash_domains, [
+        AshAgentTools.Test.Domain,
+        NotADomain
+      ])
+
+      tool = tool("ash_describe")
+
+      assert {:ok, text, _} =
+               AshAi.Tools.execute(tool, %{"input" => %{}}, %{
+                 context: %{otp_app: :ash_agent_tools_adapter_probe}
+               })
+
+      assert "AshAgentTools.Test.Post" in Jason.decode!(text)["resources"]
+    after
+      Application.delete_env(:ash_agent_tools_adapter_probe, :ash_domains)
+    end
+  end
+
   describe "the dev-only guard" do
     test "allows a VM with Mix loaded" do
       assert Run.guard(true) == :ok

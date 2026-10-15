@@ -21,6 +21,10 @@ if Code.ensure_loaded?(AshAi) do
       tool = Keyword.fetch!(opts, :tool)
 
       with :ok <- guard() do
+        # Inside a running app, modules load lazily; load the app's
+        # declared domains so discovery sees them, as the daemon does at boot.
+        AshAgentTools.Registry.load_app_domains(otp_app(input))
+
         case Tools.call(tool, client_arguments(input.arguments)) do
           {:ok, report} -> {:ok, json_shape(report)}
           {:error, structured} -> {:error, ToolError.exception(details: json_shape(structured))}
@@ -47,6 +51,14 @@ if Code.ensure_loaded?(AshAi) do
            "did_you_mean" => []
          }
        )}
+    end
+
+    # ash_ai puts the router's otp_app in the action context.
+    defp otp_app(input) do
+      case input.context do
+        %{otp_app: app} when is_atom(app) -> app
+        _ -> nil
+      end
     end
 
     # Back to the JSON spelling the daemon receives: string keys, nil
