@@ -111,6 +111,11 @@ defmodule AshAgentTools.MixProject do
       # conditionally (Ecto's optional-Jason pattern) so a host without Plug
       # still compiles this package cleanly.
       {:plug, "~> 1.16", optional: true},
+
+      # Optional ash_ai adapter (`AshAgentTools.AshAi`): the same read-only
+      # tools as the daemon, served from ash_ai's MCP router inside a host
+      # app in dev. Compiled only when ash_ai is loaded.
+      {:ash_ai, "~> 1.1", optional: true},
       {:bandit, "~> 1.5", optional: true},
       {:file_system, "~> 1.1", optional: true},
 

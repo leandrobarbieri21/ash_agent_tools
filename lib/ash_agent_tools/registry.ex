@@ -13,17 +13,23 @@ defmodule AshAgentTools.Registry do
   about compiled-but-never-loaded modules.
   """
 
+  # This package's own ash_ai adapter is tooling, not part of the host
+  # application, so discovery leaves it out.
+  @own_modules [AshAgentTools.AshAi, AshAgentTools.AshAi.Tools]
+
   @doc """
   All currently loaded modules whose Spark DSL identity is `Ash.Domain`.
   """
   @spec list_domains() :: [module()]
-  def list_domains, do: loaded_modules_matching(&(&1.spark_is() == Ash.Domain))
+  def list_domains,
+    do: loaded_modules_matching(&(&1.spark_is() == Ash.Domain and &1 not in @own_modules))
 
   @doc """
   All currently loaded modules whose Spark DSL identity is `Ash.Resource`.
   """
   @spec list_resources() :: [module()]
-  def list_resources, do: loaded_modules_matching(&(&1.spark_is() == Ash.Resource))
+  def list_resources,
+    do: loaded_modules_matching(&(&1.spark_is() == Ash.Resource and &1 not in @own_modules))
 
   @doc """
   The loaded Ash domains that list the given resource.
@@ -37,6 +43,28 @@ defmodule AshAgentTools.Registry do
     |> Enum.filter(fn domain ->
       resource in Ash.Domain.Info.resources(domain)
     end)
+  end
+
+  @doc """
+  Loads the domains an application declares (`config :my_app, ash_domains:
+  [...]`) and the resources they list. Modules load lazily, and discovery
+  only sees loaded ones; this makes the declared surface visible. Never
+  raises; an unknown or non-domain entry is skipped.
+  """
+  @spec load_app_domains(atom() | nil) :: :ok
+  def load_app_domains(nil), do: :ok
+
+  def load_app_domains(app) when is_atom(app) do
+    for domain <- Application.get_env(app, :ash_domains, []) do
+      with {:module, domain} <- Code.ensure_loaded(domain),
+           true <- function_exported?(domain, :spark_is, 0) do
+        Enum.each(Ash.Domain.Info.resources(domain), &Code.ensure_loaded/1)
+      else
+        _ -> :ok
+      end
+    end
+
+    :ok
   end
 
   @doc """

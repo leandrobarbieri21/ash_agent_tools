@@ -257,6 +257,26 @@ defmodule AshAgentTools.Mcp.ToolsTest do
     end
   end
 
+  describe "ash_search kinds" do
+    test "accepts the dynamic kinds the card advertises" do
+      card_kinds =
+        get_in(Tools.tool_cards() |> Enum.find(&(&1.name == "ash_search")), [
+          :inputSchema,
+          :properties,
+          "kinds",
+          :items,
+          :enum
+        ])
+
+      assert "probe_widgets" in card_kinds
+
+      assert {:ok, hits} =
+               Tools.call("ash_search", %{"term" => "e", "kinds" => ["probe_widgets"]})
+
+      assert Enum.all?(hits, &(&1.kind == :probe_widgets))
+    end
+  end
+
   describe "module arguments never create atoms (iron law #10)" do
     # Each call passes a module name nobody has ever spelled, then checks the
     # atom table: a client string must be matched against known modules, not

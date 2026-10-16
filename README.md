@@ -81,7 +81,7 @@ parser.
 
 ## How agents reach it
 
-The tools are one read-only facade (`AshAgentTools`) with two ways in:
+The tools are one read-only facade (`AshAgentTools`) with three ways in:
 
 - **Plain functions and Mix tasks.** Evaluate the facade from
   `project_eval`, Livebook or `iex`, or run `mix ash_agent.*` from a shell.
@@ -90,10 +90,14 @@ The tools are one read-only facade (`AshAgentTools`) with two ways in:
 - **An MCP daemon.** `mix ash_agent.serve` serves the facade as MCP tools
   on loopback. It compiles your project and never starts it, so it works
   whether or not your app or Phoenix is running.
+- **Inside ash_ai's MCP router.** With the optional `ash_ai` dependency,
+  `AshAgentTools.AshAi` serves six of the daemon's tools (`ash_describe`,
+  `ash_validate`, `ash_can`, `ash_forbidden`, `ash_context`, `ash_search`)
+  from your running app in dev. See [Using it with ash_ai](#using-it-with-ash_ai).
 
-Both surfaces return the same JSON-encodable maps, and the daemon's tool
-cards (name, description, input schema) live in one module,
-`AshAgentTools.Mcp.Cards`.
+All surfaces return the same JSON-encodable maps. The tool cards (name,
+description, input schema) live in one module, `AshAgentTools.Mcp.Cards`,
+and both MCP surfaces read them from there.
 
 ### Where this fits
 
@@ -103,6 +107,7 @@ cards (name, description, input schema) live in one module,
 | [ash_ai](https://github.com/ash-project/ash_ai) dev MCP (`AshAi.Mcp.Dev`) | Inside the running Phoenix endpoint, in the code-reloading block | Yes | None; dev only | Dev tools for agents: list resources, usage rules, generators |
 | ash_ai production MCP (`AshAi.Mcp.Router`) | Your app's router | Yes | OAuth 2.1 or API keys | Exposes your app's own actions to external agents |
 | ash_agent_tools daemon (`mix ash_agent.serve`) | A separate `mix` process | No: it compiles the project and never starts it; Phoenix is not needed | None; loopback only | Read-only introspection: describe, validate, can, forbidden, search, context |
+| ash_agent_tools via ash_ai (`AshAgentTools.AshAi`) | Inside the running app, on ash_ai's MCP router in a dev-only route | Yes | None; dev only (refuses when `Mix` is not loaded) | The same read-only tools, next to ash_ai's own dev tools |
 
 This package does dev-time, read-only introspection of the framework
 contract (what resources, actions, inputs and policies exist, and what they
@@ -116,6 +121,63 @@ closed without merging. Tidewave has a proof of concept for a tool-definition AP
 ([#215](https://github.com/tidewave-ai/tidewave_phoenix/pull/215), open as
 of 2026-10-15). The facade functions take and return plain data, so they
 map onto such an API directly if one lands.
+
+## Using it with ash_ai
+
+`AshAgentTools.AshAi` is an ash_ai tool domain. Its resource,
+`AshAgentTools.AshAi.Tools`, has one generic action per tool. Each action
+calls the daemon's dispatch, so names, descriptions, input schemas, results
+and errors match the daemon. It compiles only when `ash_ai` is in your deps.
+
+```elixir
+def deps do
+  [
+    {:ash_ai, "~> 1.1"},
+    {:ash_agent_tools, github: "lukegalea/ash_agent_tools", only: :dev, runtime: false}
+  ]
+end
+```
+
+**Mounting it today (ash_ai 1.1 and later).** ash_ai's dev plug,
+`AshAi.Mcp.Dev`, serves a fixed tool list, so mount `AshAi.Mcp.Router`
+on its own path in your router's dev-only block:
+
+```elixir
+if Application.compile_env(:my_app, :dev_routes) do
+  scope "/" do
+    forward "/ash_agent/mcp", AshAi.Mcp.Router,
+      otp_app: :my_app,
+      protocol_version_statement: "2024-11-05",
+      actions: [{AshAgentTools.AshAi.Tools, :*}],
+      tools: [:ash_describe, :ash_validate, :ash_can, :ash_forbidden, :ash_context, :ash_search]
+  end
+end
+```
+
+Then add `http://localhost:4000/ash_agent/mcp` to your MCP client config.
+ash_ai's MCP server wraps each tool's arguments in an `input` object
+(`{"input": {"resource": "MyApp.Post", "action": "create"}}`).
+
+**Proposed upstream: one dev server.** A change proposed to ash_ai would
+let its dev plug take extra tool domains, so the tools appear next to
+ash_ai's own dev tools on `/ash_ai/mcp`. It is not available in ash_ai yet.
+If it lands as proposed, the endpoint would read:
+
+```elixir
+plug AshAi.Mcp.Dev,
+  otp_app: :my_app,
+  dev_tool_domains: [AshAgentTools.AshAi]
+```
+
+What runs where: inside the app the tools run in your app's VM.
+`ash_describe`, `ash_validate`, `ash_forbidden`, `ash_context` and
+`ash_search` read compiled DSL only. `ash_can` reads the actor record (and,
+for update/destroy, the target record) with an unauthorized `Ash.get`, so
+it reads your dev data; it never runs the action. Every action refuses
+when `Mix` is not loaded, as in a release. The daemon-only tools
+(`ash_daemon_status`, `ash_reload`) and the optional concept tools are not
+part of the adapter, and the adapter's own domain and resource are left
+out of discovery.
 
 ## Features
 

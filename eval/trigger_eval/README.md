@@ -59,11 +59,27 @@ decision instead.
      -d '{"jsonrpc":"2.0","id":1,"method":"tools/list"}' | jq
    ```
 
+   The same runner drives the ash_ai-mounted surface (`AshAgentTools.AshAi`
+   on `AshAi.Mcp.Router`) with a full URL. It handles ash_ai's session id
+   and renders the cards from inside ash_ai's `input` wrapper:
+
+   ```sh
+   eval/trigger_eval/run_gate.sh --url http://localhost:4000/ash_agent/mcp --out results.md
+   ```
+
+   That surface serves six tools, so the rows for `ash_daemon_status` and
+   `ash_reload` fail there by construction; the per-tool table only scores
+   the tools the surface lists.
+
 3. Score per tool: `passes / queries targeting that tool`. The should-not
    rows count against the tool they must *not* trigger (a `too_broad` hit)
    or are attributed as `neighbor_collision` when another surface answered.
 
 4. Post the table (tool → score → failing queries → labels) to the PR.
+
+A should-trigger row may list `also_accept`: other tools that answer the
+query equally well where both are connected (for example ash_ai's
+`list_ash_resources` next to `ash_describe`). Picking one of those passes.
 
 ## Maintenance
 

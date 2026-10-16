@@ -49,10 +49,6 @@ defmodule AshAgentTools.Mcp.Tools do
   alias AshAgentTools.Registry
   alias AshAgentTools.Suggest
 
-  @valid_kind_strings Map.new(AshAgentTools.Search.valid_kinds(), fn kind ->
-                        {Atom.to_string(kind), kind}
-                      end)
-
   @typedoc "A tool result: the report map, or the structured error."
   @type result ::
           {:ok, map() | [map()]} | {:error, %{error: String.t(), did_you_mean: [String.t()]}}
@@ -596,12 +592,16 @@ defmodule AshAgentTools.Mcp.Tools do
   defp kinds_opts(kinds) when is_list(kinds) do
     # JSON gives strings; check each against the known kinds so the
     # structured unknown-kind error is precise (not an atom-table miss).
+    # Read at call time: loaded Spark extensions add dynamic kinds, and the
+    # card advertises them too.
+    valid = valid_kind_strings()
+
     result =
       Enum.reduce_while(kinds, {:ok, []}, fn
         kind, {:ok, acc} when is_binary(kind) ->
-          case Map.fetch(@valid_kind_strings, kind) do
+          case Map.fetch(valid, kind) do
             {:ok, atom} -> {:cont, {:ok, [atom | acc]}}
-            :error -> {:halt, {:error, unknown_kind_error(kind)}}
+            :error -> {:halt, {:error, unknown_kind_error(kind, valid)}}
           end
 
         other, _acc ->
@@ -621,11 +621,14 @@ defmodule AshAgentTools.Mcp.Tools do
       {:error,
        %{error: "\"kinds\" must be an array of strings, got: #{inspect(other)}", did_you_mean: []}}
 
-  defp unknown_kind_error(kind) do
+  defp valid_kind_strings,
+    do: Map.new(AshAgentTools.Search.valid_kinds(), &{Atom.to_string(&1), &1})
+
+  defp unknown_kind_error(kind, valid) do
     %{
       error:
         "unknown search kind #{inspect(kind)}. Valid kinds: #{inspect(AshAgentTools.Search.valid_kinds())}",
-      did_you_mean: Suggest.closest(kind, Map.keys(@valid_kind_strings))
+      did_you_mean: Suggest.closest(kind, Map.keys(valid))
     }
   end
 

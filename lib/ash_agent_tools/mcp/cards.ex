@@ -351,6 +351,14 @@ defmodule AshAgentTools.Mcp.Cards do
   @spec input_schema(String.t()) :: map()
   def input_schema(name), do: fetch!(name).inputSchema
 
+  @doc """
+  The description of one argument of one tool, as the card states it.
+  """
+  @spec argument_description(String.t(), String.t()) :: String.t() | nil
+  def argument_description(tool, argument) do
+    get_in(input_schema(tool), [:properties, argument, :description])
+  end
+
   defp card(name, description, properties, required) do
     %{
       name: name,

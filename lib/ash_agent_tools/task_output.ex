@@ -118,19 +118,6 @@ defmodule AshAgentTools.TaskOutput do
   visible without starting the application.
   """
   def load_configured_domains do
-    app = Mix.Project.config()[:app]
-
-    for domain <- Application.get_env(app, :ash_domains, []) do
-      with {:module, domain} <- Code.ensure_loaded(domain),
-           true <- function_exported?(domain, :spark_is, 0) do
-        for resource <- Ash.Domain.Info.resources(domain) do
-          Code.ensure_loaded(resource)
-        end
-      else
-        _ -> :ok
-      end
-    end
-
-    :ok
+    AshAgentTools.Registry.load_app_domains(Mix.Project.config()[:app])
   end
 end

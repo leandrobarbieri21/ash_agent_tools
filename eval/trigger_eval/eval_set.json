@@ -1,7 +1,7 @@
 {
   "_meta": {
     "name": "serve-daemon-trigger-eval",
-    "version": 1,
+    "version": 2,
     "description": "Pre-launch trigger-eval gate for the `mix ash_agent.serve` MCP daemon. Each query is run against the daemon's tool descriptions by a real client; the query passes when the client triggers (or declines to trigger) exactly as `should_trigger` prescribes. Gate: 75% per-tool. Failures are labeled with the phxagents taxonomy: `missing_term` (the phrasing never matches), `too_broad` (triggered where it should not have), `neighbor_collision` (the right intent, wrong tool — e.g. answered by tidewave's project_eval or the shell instead).",
     "gate": "0.75 per tool, pre-merge",
     "mechanics": "See README.md in this directory. Not wired into CI by design: run before merge with the daemon on a scratch port.",
@@ -72,6 +72,30 @@
       "query": "show me the authorization policies on MyApp.Post",
       "should_trigger": true,
       "expected_tool": "ash_forbidden"
+    },
+    {
+      "query": "can a non-admin user approve this order? give me the policy verdict without running the action",
+      "should_trigger": true,
+      "expected_tool": "ash_can"
+    },
+    {
+      "query": "would MyApp.Post update be allowed for actor MyApp.User:8e1c-42? check the policies for that user",
+      "should_trigger": true,
+      "expected_tool": "ash_can"
+    },
+    {
+      "query": "is an anonymous visitor allowed to call the create action on MyApp.Comment?",
+      "should_trigger": true,
+      "expected_tool": "ash_can"
+    },
+    {
+      "query": "list every Ash resource with the domain it belongs to",
+      "should_trigger": true,
+      "expected_tool": "ash_describe",
+      "also_accept": [
+        "list_ash_resources"
+      ],
+      "neighbor": "ash_ai's dev tool list_ash_resources answers the same question where both servers are connected; either pick is correct"
     },
     {
       "query": "did my last edit to lib/ get picked up? what does the daemon see?",
