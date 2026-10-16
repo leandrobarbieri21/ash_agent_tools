@@ -29,7 +29,12 @@
   AshAgentTools.Test.Bpmn.ProcessEvent,
   AshAgentTools.Test.DecisionsDomain,
   AshAgentTools.Test.Decisions.Definition,
-  AshAgentTools.Test.Decisions.Evaluation
+  AshAgentTools.Test.Decisions.Evaluation,
+  # the code-subject host (a code-unit resource with a declared question,
+  # and its facts table) joins the index the same way
+  AshAgentTools.Test.CodeSubjectsDomain,
+  AshAgentTools.Test.CodeUnit,
+  AshAgentTools.Test.CodeFact
 ]
 |> Enum.each(&Code.ensure_loaded!/1)
 

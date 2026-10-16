@@ -95,6 +95,18 @@ defmodule AshAgentTools.MixProject do
       {:ash_bpmn, github: "lukegalea/ash_bpmn", optional: true},
       {:ash_decisions, github: "lukegalea/ash_decisions", optional: true},
 
+      # Optional judgment substrate for code subjects
+      # (`AshAgentTools.CodeSubjects`): its canonical-JSON digest is the
+      # one a recorded judgment's `state_digest` uses, so a code unit's
+      # current digest and a fact's `subject_state_digest` are comparable
+      # by construction. The tests also run `AshJudgments.Query` over its
+      # temporal facts fragment. Without the dep, extraction and spans
+      # still work and the digest functions raise the "add the dep" error.
+      {:ash_judgments, github: "lukegalea/ash_judgments", optional: true},
+      # ash_judgments 0.3.0 imports Telemetry.Metrics in a function body, so
+      # it does not compile without this (its own optional) dependency.
+      {:telemetry_metrics, "~> 1.0", only: [:dev, :test]},
+
       # Test workhorse: the ash_bpmn/ash_decisions resource macros are
       # AshPostgres by construction (`repo:` is a required option), so the
       # BPMN/decision tooling tests run against a real PostgreSQL through a

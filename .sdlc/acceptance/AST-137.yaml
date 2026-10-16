@@ -1,0 +1,40 @@
+---
+# Acceptance criteria for AST-137 (code as judgment subjects), in the
+# SDLC-49 acceptance schema.
+item: AST-137
+
+criteria:
+  - id: AST-137/AC-1
+    given: >-
+      a module of generated functions whose facts were admitted with the
+      digest each question saw
+    when: >-
+      one function is edited (its body, often its line count) and the facts
+      are read back with AshJudgments.Query against the code's current digests
+    then: >-
+      the edited function's fact reads stale and every other function's fact
+      still reads in, for a text-only question and for a question that
+      declares module context; editing the declared context (the policies
+      section) stales exactly the facts of the question that declares it
+    verify: unit
+    risk: high
+    test: >-
+      test/code_subjects_property_test.exs::property editing a function
+      invalidates its facts; editing an unrelated function does not;
+      test/code_subjects_property_test.exs::property editing the declared
+      context invalidates exactly the facts of questions that declare it
+
+  - id: AST-137/AC-2
+    given: >-
+      the subjects of this package's own lib, test and docs, a diff's hunks,
+      commit messages, and chunks
+    when: each subject's location is followed
+    then: >-
+      it is a path:line naming a file that exists, and that line is the
+      subject's own line; a committed message resolves to its commit sha
+      (and URL when a web base is given)
+    verify: unit
+    risk: medium
+    test: >-
+      test/code_subjects_test.exs::describe AST-137/AC-2: every subject
+      resolves back to a clickable path:line

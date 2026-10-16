@@ -317,6 +317,26 @@ out of discovery.
   `review`) with counts for every tier; the law text ships as the
   `usage-rules/iron-laws.md` sub-rule for `mix usage_rules.sync`.
 
+- **Code as judgment subjects** — `code_subjects/2` (`AshAgentTools.CodeSubjects`)
+  turns a checkout into addressable subjects for questions judged over
+  code: modules, functions (all clauses of a name/arity), DSL entities,
+  `@moduledoc`/`@doc` and Markdown paragraphs, diff hunks and commit
+  messages. Each has a stable id (`"<repository>:<path>#<name_path>"`,
+  e.g. `MyApp.Post.publish/1`, `MyApp.Post/policies/policy[0]`), a
+  clickable `path:line`, and its text. Line numbers are never part of an
+  address or a digest, so editing one function leaves every other
+  function's address and digest alone. With the optional `ash_judgments`
+  dependency, `digest/2` hashes what a question sees (the unit's text plus
+  the context it declares: the module header, the moduledoc, a DSL
+  section such as `policies`, or the whole module) exactly as a recorded
+  judgment's `state_digest`, `current_digests/3` feeds
+  `AshJudgments.Query` so facts about changed code read `stale`, and
+  `AshAgentTools.CodeSubjects.Projection` declares a question's
+  projection. `chunk/3` splits units that would not fit the decision
+  model's context (1,024 tokens by default), and
+  `AshAgentTools.CodeSubjects.Fragment` is the subject resource a host
+  declares its questions on.
+
 - **MCP daemon** — `mix ash_agent.serve` starts a supervised, loopback-only
   MCP server (POST-only JSON-RPC over HTTP on `127.0.0.1:4100`, stateless,
   no sessions, no SSE) that exposes the facade as tools: `ash_describe`,
