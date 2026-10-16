@@ -99,7 +99,12 @@ defmodule Mix.Tasks.AshAgent.Search do
             )
 
           envelope =
-            %{query: term, kinds: kinds, count: length(results), results: results}
+            %{
+              query: term,
+              kinds: kinds,
+              count: length(results),
+              results: AshAgentTools.Search.to_json(results)
+            }
             |> Map.merge(
               if results == [] do
                 %{did_you_mean: AshAgentTools.Search.did_you_mean(term)}
