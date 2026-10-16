@@ -235,13 +235,14 @@ defmodule AshAgentTools.Edit.Batch do
     end
   end
 
+  # NamePath.resolve/2 returns {:ok, report} or raises ArgumentError on a miss
+  # or an ambiguity; either way there is no single module to name.
   def resolve_module_only(name_path) when is_binary(name_path) do
     module_part = name_path |> String.trim_leading("/") |> String.split("/") |> hd()
-
-    case NamePath.resolve(module_part) do
-      {:ok, report} -> report.module.module
-      _ -> nil
-    end
+    {:ok, report} = NamePath.resolve(module_part)
+    report.module.module
+  rescue
+    ArgumentError -> nil
   end
 
   def batch_digest_check(_normalized, opts, current_shape) do
