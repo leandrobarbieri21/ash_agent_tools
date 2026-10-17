@@ -438,7 +438,7 @@ defmodule AshAgentTools do
 
       iex> report = AshAgentTools.availability()
       iex> Enum.count(report.integrations)
-      4
+      5
 
   """
   @spec availability() :: map()
@@ -614,6 +614,22 @@ defmodule AshAgentTools do
   def judge_laws(source, opts \\ []), do: AshAgentTools.Laws.judge(source, opts)
 
   @doc """
+  The code units under a repository root as judgment subjects: modules,
+  functions, DSL entities and doc paragraphs, each with a stable
+  `"<repository>:<path>#<name_path>"` id, a clickable `path:line`
+  location and its text. See `AshAgentTools.CodeSubjects` for diff hunks,
+  commit messages, projections, digests and chunking.
+
+  ## Examples
+
+      iex> report = AshAgentTools.code_subjects("test/fixtures/code_subjects", paths: ["lib"])
+      iex> report.subjects |> Enum.filter(&(&1.kind == :function)) |> Enum.map(& &1.location)
+      ["lib/demo/ticket.ex:40", "lib/demo/ticket.ex:43", "lib/demo/ticket.ex:51"]
+  """
+  @spec code_subjects(Path.t(), keyword()) :: map()
+  def code_subjects(root, opts \\ []), do: AshAgentTools.CodeSubjects.scan(root, opts)
+
+  @doc """
   Returns the snippet an agent should evaluate to use this API in-VM.
 
   Per-query `mix` boots cost seconds to minutes (cold compile, dependency
@@ -667,7 +683,8 @@ defmodule AshAgentTools do
                                                               # (edits: AshAgentTools.Edit — create_entity, replace/insert/safe_delete,
                                                               #  apply_batch; dry-run by default, digest handshake, auto-revert gate)
         AshAgentTools.judge_laws(source)                      # iron-law judge: violations vs the 26 laws, tiered definite/likely/review
-        AshAgentTools.availability()                          # which optional integrations are active (ash_rules, ash_state_machine)
+        AshAgentTools.code_subjects("/path/to/repo")          # code units as judgment subjects: id, path:line, text (digests: AshAgentTools.CodeSubjects)
+        AshAgentTools.availability()                          # which optional integrations are active (ash_rules, ash_judgments, ...)
 
     Optional concept tooling (hosts add the dep, the tools activate):
 

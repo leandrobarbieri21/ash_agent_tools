@@ -47,6 +47,25 @@ defmodule AshAgentTools.AvailabilityOffTest do
       on!(AshDecisions, dir)
     end
 
+    test "code-subject digests name the dep to add instead of crashing" do
+      {:ok, [subject | _]} =
+        AshAgentTools.CodeSubjects.from_source("defmodule Off do\nend\n", "off.ex",
+          repository: "r"
+        )
+
+      dir = ebin_dir!(AshJudgments)
+      off!(AshJudgments, dir)
+
+      assert_raise ArgumentError,
+                   ~r/ash_judgments tooling is not available: add \{:ash_judgments, github: "lukegalea\/ash_judgments"\}/,
+                   fn -> AshAgentTools.CodeSubjects.digest(subject) end
+
+      # Extraction and locations need no judgment substrate.
+      assert subject.location == "off.ex:1"
+
+      on!(AshJudgments, dir)
+    end
+
     test "availability reports the integration as inactive while its beam is off the path" do
       dir = ebin_dir!(AshDecisions)
       off!(AshDecisions, dir)

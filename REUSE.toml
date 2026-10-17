@@ -19,6 +19,7 @@ path = [
   "docs/**/*.md",
   "eval/trigger_eval/eval_set.json",
   "test/fixtures/*.json",
+  "test/fixtures/code_subjects/**/*.md",
   ".sdlc/**",
   "opencode.json",
   "devenv.yaml",

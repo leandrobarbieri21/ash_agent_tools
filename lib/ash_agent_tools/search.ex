@@ -176,7 +176,7 @@ defmodule AshAgentTools.Search do
   ## Examples
 
       iex> AshAgentTools.Search.did_you_mean("tgas")
-      ["tags", "task", "read"]
+      ["tags", "task", "read", "scan", "sha"]
 
       iex> AshAgentTools.Search.did_you_mean("")
       []

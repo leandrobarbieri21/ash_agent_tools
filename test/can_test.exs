@@ -110,20 +110,16 @@ defmodule AshAgentTools.CanTest do
     end
 
     test "an unresolvable actor raises with candidates and emits the kaizen gap" do
-      # The dev sink is idempotent; attach so this async test does not depend
-      # on kaizen_test's attach having run first.
-      AshAgentTools.Kaizen.attach()
-      AshAgentTools.Kaizen.reset()
+      # Read the event in this process: the dev sink is one global table that
+      # other async tests reset, so a gap recorded there can vanish before the
+      # digest is read.
+      AshAgentTools.KaizenProbe.forward_gaps_to_self()
 
       assert_raise ArgumentError, ~r/could not resolve the actor record/, fn ->
         AshAgentTools.can(User, :update, %{resource: AshAgentTools.Test.Author, id: "nope"})
       end
 
-      digest = AshAgentTools.Kaizen.digest()
-
-      gap = Enum.find(digest.gaps, &(&1.tool == "can" and &1.gap_kind == "actor_resolve_miss"))
-      assert gap != nil
-      assert gap.count >= 1
+      assert_receive {:tool_gap, %{count: 1}, %{tool: :can, gap_kind: :actor_resolve_miss}}
     end
 
     test "unknown actions and non-resources raise the usual errors" do

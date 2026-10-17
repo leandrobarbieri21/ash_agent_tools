@@ -25,7 +25,7 @@ defmodule AshAgentTools.Availability do
   """
 
   @type integration ::
-          :ash_rules | :ash_state_machine | :ash_bpmn | :ash_decisions
+          :ash_rules | :ash_state_machine | :ash_bpmn | :ash_decisions | :ash_judgments
 
   @integrations [
     %{
@@ -55,6 +55,14 @@ defmodule AshAgentTools.Availability do
       dep: ~s({:ash_decisions, github: "lukegalea/ash_decisions"}),
       tools: [:decisions, :decision_evaluate],
       concept: "DMN decisions: catalogues, stored verification, dry evaluation"
+    },
+    %{
+      integration: :ash_judgments,
+      module: AshJudgments,
+      dep: ~s({:ash_judgments, github: "lukegalea/ash_judgments"}),
+      tools: [:code_subject_digests],
+      concept:
+        "code units as judgment subjects: state digests and projections for declared questions"
     }
   ]
 

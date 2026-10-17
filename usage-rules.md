@@ -582,6 +582,52 @@ Read hits honestly: a hit means the *pattern* matched, and the tier is the
 pattern's certainty — judge context (the compile-time-constant
 `String.to_atom` is the documented exception to #10).
 
+## Code as judgment subjects
+
+`AshAgentTools.CodeSubjects` (facade: `code_subjects/2`) makes code units
+addressable for questions judged over code. Extraction is syntactic, so it
+reads any checkout, loaded or not.
+
+```elixir
+%{subjects: subjects} =
+  AshAgentTools.code_subjects(root, repository: "my_app", context: [:module_header, {:section, :policies}])
+
+subject.id          # "my_app:lib/my_app/post.ex#MyApp.Post.publish/1"
+subject.location    # "lib/my_app/post.ex:42" (a committed message: its sha)
+subject.kind        # :module | :function | :dsl_entity | :doc_paragraph | :diff_hunk | :commit_message
+
+AshAgentTools.CodeSubjects.from_diff(diff, root: root)        # hunks under the unit that encloses them
+AshAgentTools.CodeSubjects.from_commits(root, "main..HEAD")   # commit messages (runs git log, read-only)
+AshAgentTools.CodeSubjects.locate(subjects, path, line)       # a laws-judge hit -> the subject it is about
+AshAgentTools.CodeSubjects.chunk(subject, projection)         # line-aligned chunks within 1,024 tokens
+```
+
+- **Addresses survive unrelated edits.** Name paths and digests never
+  contain line numbers. `resolve/3` finds a subject again in today's
+  source by path and name path.
+- **A question declares what it sees.** Context is chosen per question:
+  `:module_header`, `:moduledoc`, `{:section, name}` or `:module`. Capture
+  at extraction the union of what your questions declare; a projection
+  over uncaptured context raises rather than digesting a guess.
+- **Digests compare with recorded judgments** (optional `ash_judgments`
+  dependency). `digest/2` is `AshJudgments.Registry.Canonical` over the
+  projected state, the same computation a judgment's `state_digest` uses.
+  Pass `current_digests/3` to `AshJudgments.Query` as `:current_digests`;
+  a fact about changed code reads `{:unknown, :stale}`.
+- **One projection module per declared context:**
+  `use AshAgentTools.CodeSubjects.Projection, context: [...]` gives the
+  `state_projection` and `shape/0` (for `state_shape`) a question names.
+  The judge action's `input` is the subject map.
+- `AshAgentTools.CodeSubjects.Fragment` is the subject resource: include
+  it on your own resource, declare questions there, and pass that
+  resource's name as `type:` to `subject_term/2`.
+- DSL entities are recognised by syntax: a call inside a section whose
+  first argument is a literal atom, or any call in `policies`,
+  `field_policies`, `validations`, `changes` or `preparations`
+  (addressed by occurrence). Core Ash sections match `resolve/1`'s name
+  paths; an option with a literal atom value (`strategy :context`) is
+  addressed as an entity too.
+
 ## Integration posture
 
 - Three ways in, one facade: plain functions and Mix tasks (evaluate

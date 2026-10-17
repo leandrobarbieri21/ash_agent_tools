@@ -66,17 +66,14 @@ defmodule AshAgentTools.BpmnToolsTest do
     end
 
     test "a key miss answers with an empty list and emits the kaizen gap" do
-      AshAgentTools.Kaizen.attach()
-      AshAgentTools.Kaizen.reset()
+      # In-process, for the reason in can_test: the dev sink is shared.
+      AshAgentTools.KaizenProbe.forward_gaps_to_self()
 
       publish_definition!(@definition_resource, "review", "Review", @review_xml)
 
       assert %{count: 0, processes: []} = AshAgentTools.processes(nil, key: "nope")
 
-      gap =
-        Enum.find(AshAgentTools.Kaizen.digest().gaps, &(&1.tool == "processes"))
-
-      assert gap != nil
+      assert_receive {:tool_gap, _measurements, %{tool: :processes}}
     end
   end
 
