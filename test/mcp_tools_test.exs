@@ -48,6 +48,19 @@ defmodule AshAgentTools.Mcp.ToolsTest do
       assert "AshAgentTools.Test.Post" in error.did_you_mean
     end
 
+    test "every resource sharing the short name is suggested" do
+      named = [
+        {"post", "MyApp.Blog.Post"},
+        {"post", "MyApp.Archive.Post"},
+        {"author", "MyApp.Blog.Author"}
+      ]
+
+      assert Tools.resource_did_you_mean("Post", named) == [
+               "MyApp.Archive.Post",
+               "MyApp.Blog.Post"
+             ]
+    end
+
     test "an unknown action misses with did_you_mean candidates" do
       {:error, error} =
         Tools.call("ash_describe", %{"resource" => "AshAgentTools.Test.Post", "action" => "creat"})
@@ -89,7 +102,20 @@ defmodule AshAgentTools.Mcp.ToolsTest do
     test "searches across loaded resources" do
       {:ok, hits} = Tools.call("ash_search", %{"term" => "by_tag"})
 
-      assert Enum.any?(hits, &(&1.resource == AshAgentTools.Test.Post and &1.name == :by_tag))
+      assert Enum.any?(hits, &(&1.resource == "AshAgentTools.Test.Post" and &1.name == :by_tag))
+    end
+
+    test "resources are module names, never Elixir.-prefixed atom strings" do
+      {:ok, hits} = Tools.call("ash_search", %{"term" => "tag"})
+
+      assert hits != []
+
+      assert Enum.all?(
+               hits,
+               &(is_binary(&1.resource) and not String.starts_with?(&1.resource, "Elixir."))
+             )
+
+      refute hits |> Jason.encode!() |> String.contains?("Elixir.")
     end
 
     test "kind filters accept JSON strings" do

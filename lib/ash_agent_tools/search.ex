@@ -149,6 +149,24 @@ defmodule AshAgentTools.Search do
   end
 
   @doc """
+  The JSON form of `semantic_search/2` hits, as the Mix task and the MCP
+  `ash_search` tool emit them: `resource` becomes its module name
+  (`"MyApp.Post"`, not the atom's `"Elixir.MyApp.Post"`). Every other
+  field already encodes as is.
+
+  ## Examples
+
+      iex> [hit | _] = "tag" |> AshAgentTools.semantic_search() |> AshAgentTools.Search.to_json()
+      iex> String.starts_with?(hit.resource, "Elixir.")
+      false
+
+  """
+  @spec to_json([map()]) :: [map()]
+  def to_json(hits) when is_list(hits) do
+    Enum.map(hits, &%{&1 | resource: Registry.module_name(&1.resource)})
+  end
+
+  @doc """
   The closest known symbol names to a missed search term, closest first
   (at most 5, case-insensitive Levenshtein distance at most 3). Never
   raises: a blank or non-binary term, or a world with no symbols, simply

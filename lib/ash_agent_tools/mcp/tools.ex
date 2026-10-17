@@ -318,7 +318,7 @@ defmodule AshAgentTools.Mcp.Tools do
   defp search(%{} = args) do
     with {:ok, term} <- required_string(args["term"], "term"),
          {:ok, opts} <- kinds_opts(args["kinds"]) do
-      {:ok, AshAgentTools.semantic_search(term, opts)}
+      {:ok, term |> AshAgentTools.semantic_search(opts) |> AshAgentTools.Search.to_json()}
     end
   end
 
@@ -691,20 +691,23 @@ defmodule AshAgentTools.Mcp.Tools do
   end
 
   # An exact short-name hit ("Post") most likely means the agent used the
-  # short name where the full module is needed — suggest that directly.
-  defp resource_did_you_mean(name) do
-    target = String.downcase(name)
+  # short name where the full module is needed — suggest every resource with
+  # that short name directly. Takes `{short_name, module_name}` pairs; public
+  # only so tests can pass pairs that no loaded resource has.
+  @doc false
+  def resource_did_you_mean(name, named \\ resource_short_names()) do
+    by_short_name = Enum.group_by(named, &elem(&1, 0), &elem(&1, 1))
 
-    short_pairs =
-      Map.new(AshAgentTools.list_resources(), fn resource ->
-        short = resource |> Ash.Resource.Info.short_name() |> to_string() |> String.downcase()
+    case Map.fetch(by_short_name, String.downcase(name)) do
+      {:ok, full_names} -> Enum.sort(full_names)
+      :error -> Suggest.closest(name, by_short_name |> Map.values() |> List.flatten())
+    end
+  end
 
-        {short, Registry.module_name(resource)}
-      end)
-
-    case Map.fetch(short_pairs, target) do
-      {:ok, full_name} -> [full_name]
-      :error -> Suggest.closest(name, Map.values(short_pairs))
+  defp resource_short_names do
+    for resource <- AshAgentTools.list_resources() do
+      short = resource |> Ash.Resource.Info.short_name() |> to_string() |> String.downcase()
+      {short, Registry.module_name(resource)}
     end
   end
 
