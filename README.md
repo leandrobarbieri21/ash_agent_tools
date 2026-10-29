@@ -315,7 +315,9 @@ out of discovery.
   MIT) with deterministic grep-tier detectors — no LLM, no keys, no boot.
   Violations-only output at three certainty tiers (`definite`, `likely`,
   `review`) with counts for every tier; the law text ships as the
-  `usage-rules/iron-laws.md` sub-rule for `mix usage_rules.sync`.
+  `usage-rules/iron-laws.md` sub-rule for `mix usage_rules.sync`. Projects
+  add their own laws through `config :ash_agent_tools, extra_laws: [...]`
+  (`AshAgentTools.Laws.Source`), judged alongside the core 26.
 
 - **Code as judgment subjects** — `code_subjects/2` (`AshAgentTools.CodeSubjects`)
   turns a checkout into addressable subjects for questions judged over
