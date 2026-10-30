@@ -215,4 +215,127 @@ defmodule AshAgentTools.ProjectLawsTest do
       end
     end
   end
+
+  describe ":custom detectors" do
+    defp custom_law(check, extra \\ %{}) do
+      Map.merge(
+        %{
+          id: "ui-20",
+          name: "click-targets",
+          category: :ui,
+          title: "Click targets are controls",
+          summary: "phx-click belongs on a button or a link, not a div.",
+          detectors: [
+            %{kind: :custom, tier: :likely, hint: "put phx-click on the control", check: check}
+          ]
+        },
+        extra
+      )
+    end
+
+    # Lines whose text contains the needle, as the detector's line numbers.
+    defp lines_with(needle) do
+      fn _source, meta ->
+        for {line, no} <- Enum.with_index(meta.lines, 1), String.contains?(line, needle), do: no
+      end
+    end
+
+    @source """
+    <div phx-click="open">a</div>
+    <button phx-click="open">b</button>
+    """
+
+    test "a hit by line number takes the line's text and the detector's hint" do
+      report = Laws.judge(@source, extra_laws: [custom_law(lines_with("<div phx-click"))])
+
+      assert [violation] = report.violations
+      assert %{law: "ui-20", tier: :likely, line: 1} = violation
+      assert violation.text == ~s(<div phx-click="open">a</div>)
+      assert violation.hint == "put phx-click on the control"
+    end
+
+    test "a hit map may carry its own text and hint" do
+      check = fn _source, _meta ->
+        [%{line: 2, text: "the button", hint: "this one is fine, but"}]
+      end
+
+      report = Laws.judge(@source, extra_laws: [custom_law(check)])
+
+      assert [%{line: 2, text: "the button", hint: "this one is fine, but"}] = report.violations
+    end
+
+    test "check receives the source and meta with file, lines and diff?" do
+      me = self()
+      check = fn source, meta -> send(me, {:checked, source, meta}) && [] end
+
+      Laws.judge(@source, extra_laws: [custom_law(check)], file: "lib/x.heex")
+      assert_receive {:checked, @source, %{file: "lib/x.heex", lines: lines, diff?: false}}
+      assert length(lines) == 3
+
+      Laws.judge(@source, extra_laws: [custom_law(check)])
+      assert_receive {:checked, @source, %{file: nil, diff?: false}}
+    end
+
+    test "runs in diff mode, receiving the diff" do
+      diff = "+++ b/lib/x.heex\n+<div phx-click=\"open\">a</div>\n x\n"
+
+      report =
+        Laws.judge(diff, extra_laws: [custom_law(lines_with("<div phx-click"))], diff?: true)
+
+      assert [%{line: 2, text: ~s(+<div phx-click="open">a</div>)}] = report.violations
+      me = self()
+
+      Laws.judge(diff,
+        extra_laws: [custom_law(fn _s, meta -> send(me, meta.diff?) && [] end)],
+        diff?: true
+      )
+
+      assert_receive true
+    end
+
+    test "tiers, --law selection and counts apply like any detector" do
+      law =
+        custom_law(lines_with("phx-click"), %{
+          detectors: [%{kind: :custom, tier: :review, hint: "h", check: lines_with("phx-click")}]
+        })
+
+      report = Laws.judge(@source, extra_laws: [law])
+      assert report.violations == []
+      assert report.counts.review == 2
+
+      assert Laws.judge(@source, extra_laws: [law], min_tier: :review, laws: ["ui-20"]).violations
+             |> length() == 2
+
+      assert Laws.judge(@source, extra_laws: [law], min_tier: :review, laws: ["10"]).violations ==
+               []
+
+      assert is_binary(Jason.encode!(Laws.judge(@source, extra_laws: [law], min_tier: :review)))
+    end
+
+    test "a bad return is the project's bug, named" do
+      assert_raise ArgumentError, ~r/law "ui-20" returned "nope"; expected a list/, fn ->
+        Laws.judge(@source, extra_laws: [custom_law(fn _, _ -> "nope" end)])
+      end
+
+      assert_raise ArgumentError, ~r/law "ui-20" returned the hit %{line: 0}/, fn ->
+        Laws.judge(@source, extra_laws: [custom_law(fn _, _ -> [%{line: 0}] end)])
+      end
+
+      assert_raise ArgumentError, ~r/returned the hit %{line: 1, text: 7}/, fn ->
+        Laws.judge(@source, extra_laws: [custom_law(fn _, _ -> [%{line: 1, text: 7}] end)])
+      end
+    end
+
+    test "check must be a function of (source, meta)" do
+      for check <- [nil, fn _ -> [] end, "f"] do
+        law = custom_law(check)
+
+        assert_raise ArgumentError,
+                     ~r/a :custom detector of law "ui-20" needs :check \(a function of \(source, meta\)\)/,
+                     fn ->
+                       Laws.judge(@source, extra_laws: [law])
+                     end
+      end
+    end
+  end
 end

@@ -37,6 +37,14 @@ defmodule AshAgentTools.Laws.Source do
         end
       end
 
+  A rule a regex cannot express is a `:custom` detector: the project's own
+  function of `(source, meta)`, `meta` being `%{file:, lines:, diff?:}`,
+  returning the lines it objects to (line numbers, or
+  `%{line:, text:, hint:}` maps with `text` and `hint` optional):
+
+      %{kind: :custom, tier: :likely, hint: "put phx-click on the control",
+        check: &MyAppWeb.Laws.UI.click_targets/2}
+
   Register it with `config :ash_agent_tools, extra_laws: [MyAppWeb.Laws.UI]`.
   Ids must be unique and must not be all digits (numeric ids are the core
   numbering); `AshAgentTools.Laws.project_laws/1` validates every law and

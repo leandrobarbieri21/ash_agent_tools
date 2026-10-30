@@ -54,6 +54,13 @@ defmodule AshAgentTools.Laws do
   be unique; a malformed law or detector raises `ArgumentError` naming it.
   Detectors match Elixir/HEEx source text, like the core ones.
 
+  When a rule needs more than a regex (a tag spanning lines, a check that
+  reads the whole file, a different language), a project writes it as a
+  `:custom` detector: `check: &MyApp.Laws.click_targets/2`, a function of
+  `(source, meta)` with `meta` as `%{file:, lines:, diff?:}`, returning the
+  lines it objects to as line numbers or `%{line:, text:, hint:}` maps. It is
+  tiered, selected, filtered and reported like any other detector.
+
   ## Examples
 
       iex> report = AshAgentTools.Laws.judge("def boom(x), do: String.to_atom(x)")
@@ -102,6 +109,8 @@ defmodule AshAgentTools.Laws do
   #                 without `unique`)
   #   * `:file`   — every `all` pattern present and no `none` pattern present
   #                 in the whole text (context laws)
+  #   * `:custom` — a project's own `check.(source, meta)` function (project
+  #                 laws only); returns the lines it objects to
   #
   # This is a grep-tier judge, not a parser: block scans count `do`/`end`
   # tokens and treat keyword `do:` as inert. The tiers carry that honesty.
@@ -603,7 +612,7 @@ defmodule AshAgentTools.Laws do
   ]
 
   @core_ids Enum.map(@laws, & &1.id)
-  @detector_kinds [:line, :mount, :window, :file]
+  @detector_kinds [:line, :mount, :window, :file, :custom]
 
   @doc """
   The law registry: the 26 iron laws with id, name, category, title,
@@ -664,7 +673,8 @@ defmodule AshAgentTools.Laws do
     * `:diff?` — treat `source` as a unified diff and judge only added lines
       (`+` lines, `+++` headers excluded). Whole-text detectors (`:mount`,
       `:window`, `:file`) are skipped: they need full-file context, which a
-      diff does not carry.
+      diff does not carry. `:custom` detectors run and receive the diff text
+      with `diff?: true` in `meta`, so a project decides for itself.
 
   The report is JSON-encodable (`Jason.encode!/1` always works; atoms encode
   as strings). `clean?` is true exactly when the (filtered) `violations` list
@@ -676,17 +686,21 @@ defmodule AshAgentTools.Laws do
     min_tier = Keyword.get(opts, :min_tier, :likely)
     selected = select_laws(opts[:laws], laws(opts))
     lines = String.split(source, ["\r\n", "\n"])
+    diff? = Keyword.get(opts, :diff?, false)
+    meta = %{file: meta_file(Keyword.get(opts, :file)), lines: lines, diff?: diff?}
 
     raw_violations =
-      if Keyword.get(opts, :diff?, false) do
-        line_violations(added_diff_lines(lines), selected, lines)
+      if diff? do
+        line_violations(added_diff_lines(lines), selected, lines) ++
+          custom_violations(source, selected, meta)
       else
         indexed = Enum.with_index(lines, 1)
 
         line_violations(indexed, selected, lines) ++
           mount_violations(lines, selected) ++
           window_violations(lines, selected) ++
-          file_violations(source, lines, selected)
+          file_violations(source, lines, selected) ++
+          custom_violations(source, selected, meta)
       end
 
     violations =
@@ -827,6 +841,60 @@ defmodule AshAgentTools.Laws do
     end
   end
 
+  # A `:custom` detector is the project's own function. `check.(source, meta)`
+  # returns the lines it objects to: a line number (the line's text and the
+  # detector's hint are used), or a map with `line` and, optionally, `text`
+  # and `hint`. Anything else is the project's bug, named as such.
+  defp custom_violations(source, laws, meta) do
+    for law <- laws,
+        det <- law.detectors,
+        det.kind == :custom,
+        hit <- custom_hits!(law, det, source, meta) do
+      {no, text, hint} = custom_hit!(law, hit)
+      line = text || Enum.at(meta.lines, no - 1) || ""
+      violation(law, %{det | hint: hint || det.hint}, no, line)
+    end
+  end
+
+  defp custom_hits!(law, det, source, meta) do
+    case det.check.(source, meta) do
+      hits when is_list(hits) ->
+        hits
+
+      other ->
+        raise ArgumentError,
+              "extra_laws: the :custom detector of law #{inspect(law.id)} returned " <>
+                "#{inspect(other)}; expected a list of hits"
+    end
+  end
+
+  defp custom_hit!(_law, no) when is_integer(no) and no > 0, do: {no, nil, nil}
+
+  defp custom_hit!(law, %{line: no} = hit) when is_integer(no) and no > 0 do
+    text = Map.get(hit, :text)
+    hint = Map.get(hit, :hint)
+
+    if (is_nil(text) or is_binary(text)) and (is_nil(hint) or is_binary(hint)) do
+      {no, text, hint}
+    else
+      bad_custom_hit!(law, hit)
+    end
+  end
+
+  defp custom_hit!(law, hit), do: bad_custom_hit!(law, hit)
+
+  defp bad_custom_hit!(law, hit) do
+    raise ArgumentError,
+          "extra_laws: the :custom detector of law #{inspect(law.id)} returned the hit " <>
+            "#{inspect(hit)}; expected a positive line number, or a map with :line and " <>
+            "optional string :text and :hint"
+  end
+
+  # The path `meta.file` names; a snippet or plain stdin has none.
+  defp meta_file(label) when label in [nil, "inline", "-"], do: nil
+  defp meta_file(label) when is_binary(label), do: label
+  defp meta_file(_), do: nil
+
   defp violation(law, det, no, line) do
     %{
       law: law.id,
@@ -944,6 +1012,7 @@ defmodule AshAgentTools.Laws do
         :mount -> regex_keys(det, [:pattern]) ++ optional_regex(det, :guarded_by)
         :window -> regex_keys(det, [:pattern]) ++ regex_list(det, :none) ++ window(det)
         :file -> regex_list(det, :all, non_empty: true) ++ regex_list(det, :none)
+        :custom -> custom_check(det)
       end
 
     if missing != [] do
@@ -978,6 +1047,9 @@ defmodule AshAgentTools.Laws do
 
     if valid?, do: [], else: ["#{inspect(key)} (a list of regexes)"]
   end
+
+  defp custom_check(%{check: check}) when is_function(check, 2), do: []
+  defp custom_check(_), do: [":check (a function of (source, meta))"]
 
   defp window(%{window: n}) when is_integer(n) and n > 0, do: []
   defp window(_), do: [":window (a positive integer)"]

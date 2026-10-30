@@ -69,7 +69,12 @@ end
   and must be unique; use a prefix (`ui-01`). Invalid laws raise
   `ArgumentError` naming the problem.
 - Detectors use the core kinds (`:line`, `:mount`, `:window`, `:file`) and
-  match Elixir/HEEx source text; other file types are out of scope.
+  match Elixir/HEEx source text. A rule a regex cannot express (a tag that
+  spans lines, a whole-file check, another language) is a `:custom`
+  detector: `check: &MyApp.Laws.f/2`, called as `check.(source, meta)` with
+  `meta` = `%{file:, lines:, diff?:}`, returning the lines it objects to as
+  line numbers or `%{line:, text:, hint:}` maps. It runs in `--diff` mode
+  too, receiving the diff text with `diff?: true`.
 - `mix ash_agent.laws` compiles the project only when project laws are
   configured (they are project modules); otherwise it stays compile-free.
 - `AshAgentTools.Laws.core_laws/0` is the core registry alone;
