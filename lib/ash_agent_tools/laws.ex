@@ -54,6 +54,14 @@ defmodule AshAgentTools.Laws do
   be unique; a malformed law or detector raises `ArgumentError` naming it.
   Detectors match Elixir/HEEx source text, like the core ones.
 
+  A law may carry `paths` and `exclude`: lists of globs (`**` crosses
+  directories, `*` and `?` stay within one, `{a,b}` is alternatives) matched
+  against the path `judge/2` is given as `:file`. With `paths` the law
+  applies only to matching files; `exclude` keeps a law off matching files.
+  In `:diff?` mode each added line is judged under its hunk's `+++` path, so
+  a scoped law applies hunk by hunk. A source with no path — `--code`, or
+  stdin that is not a diff — skips scoped laws, and `exclude` cannot fire.
+
   ## Comments
 
   The judge reads text, so a comment or a `@doc` that mentions a pattern
@@ -81,6 +89,7 @@ defmodule AshAgentTools.Laws do
           name: String.t(),
           category: atom(),
           tier: tier(),
+          file: String.t() | nil,
           line: pos_integer(),
           text: String.t(),
           hint: String.t()
@@ -661,7 +670,9 @@ defmodule AshAgentTools.Laws do
 
   ## Options
 
-    * `:file` — label reported under `source` (default `"inline"`)
+    * `:file` — the source's path, reported under `source` and on each
+      violation (default `"inline"`); project laws scoped with `paths` or
+      `exclude` are matched against it
     * `:ignore_comments` — blank comments and `@doc`/`@moduledoc`/`@typedoc`
       values before judging (`AshAgentTools.Laws.Comments.blank/2`), so
       prose that mentions a pattern is not a hit. Default `false`.
@@ -689,19 +700,36 @@ defmodule AshAgentTools.Laws do
         else: source
 
     min_tier = Keyword.get(opts, :min_tier, :likely)
+    label = Keyword.get(opts, :file, "inline")
+    path = source_path(label)
     selected = select_laws(opts[:laws], laws(opts))
     lines = String.split(source, ["\r\n", "\n"])
 
-    raw_violations =
+    {checked, raw_violations} =
       if Keyword.get(opts, :diff?, false) do
-        line_violations(added_diff_lines(lines), selected, lines)
+        # Each added line is judged under the file its hunk belongs to, so a
+        # law scoped with `paths` applies hunk by hunk.
+        files = diff_files(lines)
+
+        by_file =
+          files
+          |> Map.values()
+          |> Enum.uniq()
+          |> Map.new(fn file -> {file, Enum.filter(selected, &applies?(&1, file))} end)
+
+        file_for = fn no -> Map.get(files, no) end
+        laws_for = fn no -> Map.get(by_file, file_for.(no), []) end
+
+        {selected, line_violations(added_diff_lines(lines), lines, laws_for, file_for)}
       else
+        applicable = Enum.filter(selected, &applies?(&1, path))
         indexed = Enum.with_index(lines, 1)
 
-        line_violations(indexed, selected, lines) ++
-          mount_violations(lines, selected) ++
-          window_violations(lines, selected) ++
-          file_violations(source, lines, selected)
+        {applicable,
+         line_violations(indexed, lines, fn _no -> applicable end, fn _no -> path end) ++
+           mount_violations(lines, applicable, path) ++
+           window_violations(lines, applicable, path) ++
+           file_violations(source, lines, applicable, path)}
       end
 
     violations =
@@ -714,7 +742,7 @@ defmodule AshAgentTools.Laws do
 
     %{
       source: Keyword.get(opts, :file, "inline"),
-      laws_checked: length(selected),
+      laws_checked: length(checked),
       violations: violations,
       counts: counts,
       clean?: violations == [],
@@ -725,14 +753,14 @@ defmodule AshAgentTools.Laws do
 
   # ── detector kinds ──────────────────────────────────────────────────────
 
-  defp line_violations(pairs, laws, all_lines) do
+  defp line_violations(pairs, all_lines, laws_for, file_for) do
     for {line, no} <- pairs,
-        law <- laws,
+        law <- laws_for.(no),
         det <- law.detectors,
         det.kind == :line,
         Regex.match?(det.pattern, line),
         not next_line_suppressed?(det, all_lines, no) do
-      violation(law, det, no, line)
+      violation(law, det, no, line, file_for.(no))
     end
   end
 
@@ -752,7 +780,7 @@ defmodule AshAgentTools.Laws do
     end)
   end
 
-  defp mount_violations(lines, laws) do
+  defp mount_violations(lines, laws, file) do
     blocks = mount_blocks(lines)
 
     for law <- laws,
@@ -761,7 +789,7 @@ defmodule AshAgentTools.Laws do
         {line, no} <- blocks,
         Regex.match?(det.pattern, line),
         not mount_guarded?(det, blocks) do
-      violation(law, det, no, line)
+      violation(law, det, no, line, file)
     end
   end
 
@@ -806,7 +834,7 @@ defmodule AshAgentTools.Laws do
   defp block_opens(line), do: length(Regex.scan(@block_opener, line))
   defp block_closes(line), do: length(Regex.scan(@block_closer, line))
 
-  defp window_violations(lines, laws) do
+  defp window_violations(lines, laws, file) do
     indexed = Enum.with_index(lines, 1)
 
     for law <- laws,
@@ -815,7 +843,7 @@ defmodule AshAgentTools.Laws do
         {line, no} <- indexed,
         Regex.match?(det.pattern, line),
         not window_clean?(det, lines, no) do
-      violation(law, det, no, line)
+      violation(law, det, no, line, file)
     end
   end
 
@@ -829,7 +857,7 @@ defmodule AshAgentTools.Laws do
     |> Enum.any?(fn line -> Enum.any?(det.none, &Regex.match?(&1, line)) end)
   end
 
-  defp file_violations(source, lines, laws) do
+  defp file_violations(source, lines, laws, file) do
     for law <- laws,
         det <- law.detectors,
         det.kind == :file,
@@ -838,16 +866,17 @@ defmodule AshAgentTools.Laws do
       anchor = hd(det.all)
       no = (Enum.find_index(lines, &Regex.match?(anchor, &1)) || 0) + 1
       line = Enum.at(lines, no - 1) || ""
-      violation(law, det, no, line)
+      violation(law, det, no, line, file)
     end
   end
 
-  defp violation(law, det, no, line) do
+  defp violation(law, det, no, line, file) do
     %{
       law: law.id,
       name: law.name,
       category: law.category,
       tier: det.tier,
+      file: file,
       line: no,
       text: line |> String.slice(0, 200) |> String.trim(),
       hint: det.hint
@@ -857,6 +886,79 @@ defmodule AshAgentTools.Laws do
   # ── helpers ─────────────────────────────────────────────────────────────
 
   defp tier_rank(tier), do: Enum.find_index(@tiers, &(&1 == tier))
+
+  # The path a `:file` label names; a snippet or plain stdin has none.
+  defp source_path(label) when label in [nil, "inline", "-"], do: nil
+  defp source_path(label) when is_binary(label), do: String.replace_prefix(label, "./", "")
+  defp source_path(_), do: nil
+
+  # The file each line of a unified diff belongs to, from its `+++` headers
+  # (`b/` stripped; `/dev/null` is a deleted file, judged under no path).
+  defp diff_files(lines) do
+    lines
+    |> Enum.with_index(1)
+    |> Enum.reduce({%{}, nil}, fn {line, no}, {map, current} ->
+      current =
+        case Regex.run(~r{^\+\+\+ (?:b/)?(\S+)}, line) do
+          [_, "/dev/null"] -> nil
+          [_, path] -> source_path(path)
+          nil -> current
+        end
+
+      {Map.put(map, no, current), current}
+    end)
+    |> elem(0)
+  end
+
+  # A law with `paths` applies only to a known path matching one of them;
+  # `exclude` keeps it off matching paths. Without a path, scoped laws are
+  # skipped and `exclude` cannot fire. Core laws carry neither.
+  defp applies?(law, path) do
+    paths = Map.get(law, :paths) || []
+    exclude = Map.get(law, :exclude) || []
+
+    cond do
+      is_nil(path) -> paths == []
+      paths != [] and not Enum.any?(paths, &glob_match?(&1, path)) -> false
+      Enum.any?(exclude, &glob_match?(&1, path)) -> false
+      true -> true
+    end
+  end
+
+  # Globs as `Path.wildcard/1` spells them: `**` crosses directories, `*`
+  # and `?` stay within one, `{a,b}` is alternatives.
+  defp glob_match?(glob, path), do: Regex.match?(glob_regex(glob), path)
+
+  defp glob_regex(glob) do
+    pattern =
+      glob
+      |> String.split(~r/\*\*\/|\*\*|\*|\?|\{[^}]*\}/, include_captures: true, trim: true)
+      |> Enum.map_join(fn
+        "**/" ->
+          "(?:.*/)?"
+
+        "**" ->
+          ".*"
+
+        "*" ->
+          "[^/]*"
+
+        "?" ->
+          "[^/]"
+
+        "{" <> rest ->
+          "(?:" <>
+            (rest
+             |> String.trim_trailing("}")
+             |> String.split(",")
+             |> Enum.map_join("|", &Regex.escape/1)) <> ")"
+
+        literal ->
+          Regex.escape(literal)
+      end)
+
+    Regex.compile!("^" <> pattern <> "$")
+  end
 
   defp select_laws(nil, laws), do: laws
 
@@ -948,6 +1050,15 @@ defmodule AshAgentTools.Laws do
 
     unless is_atom(category) and not is_nil(category) do
       raise ArgumentError, "extra_laws: law #{inspect(id)} needs an atom :category"
+    end
+
+    for key <- [:paths, :exclude], Map.has_key?(law, key) do
+      value = Map.get(law, key)
+
+      unless is_list(value) and Enum.all?(value, &(is_binary(&1) and &1 != "")) do
+        raise ArgumentError,
+              "extra_laws: law #{inspect(id)} needs #{inspect(key)} to be a list of glob strings"
+      end
     end
   end
 
