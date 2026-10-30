@@ -70,6 +70,13 @@ end
   `ArgumentError` naming the problem.
 - Detectors use the core kinds (`:line`, `:mount`, `:window`, `:file`) and
   match Elixir/HEEx source text; other file types are out of scope.
+- A law that belongs to some files only carries `paths` and/or `exclude`,
+  lists of globs (`**` crosses directories, `*` and `?` stay within one,
+  `{a,b}` is alternatives) matched against the judged file's path. In
+  `--diff` mode each added line is judged under its hunk's `+++` path.
+  `--code` and non-diff stdin have no path: scoped laws are skipped there.
+- Every violation names its `file` (the path given, or the hunk's path in
+  `--diff` mode; `null` for a snippet).
 - `mix ash_agent.laws` compiles the project only when project laws are
   configured (they are project modules); otherwise it stays compile-free.
 - `AshAgentTools.Laws.core_laws/0` is the core registry alone;

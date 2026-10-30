@@ -317,7 +317,8 @@ out of discovery.
   `review`) with counts for every tier; the law text ships as the
   `usage-rules/iron-laws.md` sub-rule for `mix usage_rules.sync`. Projects
   add their own laws through `config :ash_agent_tools, extra_laws: [...]`
-  (`AshAgentTools.Laws.Source`), judged alongside the core 26.
+  (`AshAgentTools.Laws.Source`), judged alongside the core 26 and scoped to
+  files with `paths`/`exclude` when a rule belongs to some of them only.
 
 - **Code as judgment subjects** — `code_subjects/2` (`AshAgentTools.CodeSubjects`)
   turns a checkout into addressable subjects for questions judged over
