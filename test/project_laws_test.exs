@@ -216,6 +216,143 @@ defmodule AshAgentTools.ProjectLawsTest do
     end
   end
 
+  describe "paths and exclude" do
+    @web_law %{
+      id: "ui-10",
+      name: "web-buttons",
+      category: :ui,
+      title: "Buttons come from the design system",
+      summary: "Only the web layer draws buttons.",
+      paths: ["lib/my_app_web/**/*.{ex,heex}"],
+      exclude: ["lib/my_app_web/emails/**"],
+      detectors: [
+        %{kind: :line, tier: :likely, pattern: ~r/<button[\s>]/, hint: "use <ds-button>"}
+      ]
+    }
+
+    @everywhere %{
+      id: "ui-11",
+      name: "no-todo",
+      category: :style,
+      title: "No TODO",
+      summary: "A TODO is a ticket, not a comment.",
+      detectors: [%{kind: :line, tier: :review, pattern: ~r/TODO/, hint: "open a ticket"}]
+    }
+
+    @source "<button>Go</button>\n"
+
+    defp hits(source, opts) do
+      Laws.judge(
+        source,
+        Keyword.merge([extra_laws: [@web_law, @everywhere], min_tier: :review], opts)
+      )
+      |> Map.fetch!(:violations)
+      |> Enum.map(&{&1.law, &1.file})
+    end
+
+    test "a scoped law applies to a matching path and to nothing else" do
+      assert hits(@source, file: "lib/my_app_web/live/post_live.ex") == [
+               {"ui-10", "lib/my_app_web/live/post_live.ex"}
+             ]
+
+      assert hits(@source, file: "lib/my_app_web/components/card.heex") == [
+               {"ui-10", "lib/my_app_web/components/card.heex"}
+             ]
+
+      assert hits(@source, file: "lib/my_app/accounts/user.ex") == []
+      assert hits(@source, file: "test/my_app_web/live/post_live_test.exs") == []
+    end
+
+    test "exclude keeps a law off matching paths" do
+      assert hits(@source, file: "lib/my_app_web/emails/welcome.heex") == []
+    end
+
+    test "a leading ./ does not defeat the match" do
+      assert hits(@source, file: "./lib/my_app_web/live/post_live.ex") != []
+    end
+
+    test "a snippet has no path: scoped laws are skipped, unscoped laws still judge it" do
+      assert hits("<button>TODO</button>", []) == [{"ui-11", nil}]
+      assert hits("<button>TODO</button>", file: "inline") == [{"ui-11", nil}]
+    end
+
+    test "laws_checked counts the laws that apply to the file" do
+      core = length(Laws.core_laws())
+
+      report =
+        Laws.judge(@source, extra_laws: [@web_law, @everywhere], file: "lib/my_app/user.ex")
+
+      assert report.laws_checked == core + 1
+
+      report =
+        Laws.judge(@source, extra_laws: [@web_law, @everywhere], file: "lib/my_app_web/x.ex")
+
+      assert report.laws_checked == core + 2
+    end
+
+    test "glob forms: * stays within a directory, ** crosses, ? is one character, {a,b} alternates" do
+      law = fn paths -> Map.merge(@everywhere, %{id: "ui-12", paths: paths}) end
+
+      judge = fn paths, file ->
+        Laws.judge("TODO", extra_laws: [law.(paths)], min_tier: :review, file: file).clean?
+      end
+
+      refute judge.(["lib/*.ex"], "lib/a.ex")
+      assert judge.(["lib/*.ex"], "lib/sub/a.ex")
+      refute judge.(["lib/**/*.ex"], "lib/sub/deeper/a.ex")
+      refute judge.(["lib/**/*.ex"], "lib/a.ex")
+      refute judge.(["lib/?.ex"], "lib/a.ex")
+      assert judge.(["lib/?.ex"], "lib/ab.ex")
+      refute judge.(["lib/a.{ex,heex}"], "lib/a.heex")
+      assert judge.(["lib/a.{ex,heex}"], "lib/a.exs")
+    end
+
+    test "in diff mode each hunk is judged under its own file" do
+      diff = """
+      diff --git a/lib/my_app_web/live/post_live.ex b/lib/my_app_web/live/post_live.ex
+      --- a/lib/my_app_web/live/post_live.ex
+      +++ b/lib/my_app_web/live/post_live.ex
+      @@ -1,2 +1,3 @@
+      +<button>Go</button>
+       x = 1
+      diff --git a/test/post_live_test.exs b/test/post_live_test.exs
+      --- a/test/post_live_test.exs
+      +++ b/test/post_live_test.exs
+      @@ -1,2 +1,3 @@
+      +<button>Go</button>
+      +# TODO
+      """
+
+      report =
+        Laws.judge(diff,
+          extra_laws: [@web_law, @everywhere],
+          min_tier: :review,
+          diff?: true,
+          file: "-"
+        )
+
+      assert Enum.map(report.violations, &{&1.law, &1.file, &1.line}) == [
+               {"ui-10", "lib/my_app_web/live/post_live.ex", 5},
+               {"ui-11", "test/post_live_test.exs", 12}
+             ]
+    end
+
+    test "core laws keep applying everywhere, with the file on the violation" do
+      report = Laws.judge("x = String.to_atom(input)", file: "lib/anything/at_all.ex")
+      assert [%{law: "10", file: "lib/anything/at_all.ex"}] = report.violations
+    end
+
+    test "paths and exclude must be lists of glob strings" do
+      for {key, bad} <- [paths: "lib/**", exclude: [""], paths: [:lib]] do
+        law = Map.put(@everywhere, key, bad)
+
+        assert_raise ArgumentError, ~r/needs #{inspect(key)} to be a list of glob strings/, fn ->
+          Laws.judge("x", extra_laws: [law])
+        end
+      end
+    end
+  end
+
   describe ":custom detectors" do
     defp custom_law(check, extra \\ %{}) do
       Map.merge(

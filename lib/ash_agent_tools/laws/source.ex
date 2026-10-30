@@ -37,6 +37,12 @@ defmodule AshAgentTools.Laws.Source do
         end
       end
 
+  A law that belongs to some files only says so with `paths` (and `exclude`),
+  lists of globs matched against the judged file's path:
+
+      %{id: "ui-02", ..., paths: ["lib/my_app_web/**/*.{ex,heex}"],
+        exclude: ["lib/my_app_web/emails/**"], detectors: [...]}
+
   A rule a regex cannot express is a `:custom` detector: the project's own
   function of `(source, meta)`, `meta` being `%{file:, lines:, diff?:}`,
   returning the lines it objects to (line numbers, or

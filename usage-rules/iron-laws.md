@@ -75,6 +75,13 @@ end
   `meta` = `%{file:, lines:, diff?:}`, returning the lines it objects to as
   line numbers or `%{line:, text:, hint:}` maps. It runs in `--diff` mode
   too, receiving the diff text with `diff?: true`.
+- A law that belongs to some files only carries `paths` and/or `exclude`,
+  lists of globs (`**` crosses directories, `*` and `?` stay within one,
+  `{a,b}` is alternatives) matched against the judged file's path. In
+  `--diff` mode each added line is judged under its hunk's `+++` path.
+  `--code` and non-diff stdin have no path: scoped laws are skipped there.
+- Every violation names its `file` (the path given, or the hunk's path in
+  `--diff` mode; `null` for a snippet).
 - `mix ash_agent.laws` compiles the project only when project laws are
   configured (they are project modules); otherwise it stays compile-free.
 - `AshAgentTools.Laws.core_laws/0` is the core registry alone;
