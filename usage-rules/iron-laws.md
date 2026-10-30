@@ -76,7 +76,12 @@ end
   and must be unique; use a prefix (`ui-01`). Invalid laws raise
   `ArgumentError` naming the problem.
 - Detectors use the core kinds (`:line`, `:mount`, `:window`, `:file`) and
-  match Elixir/HEEx source text; other file types are out of scope.
+  match Elixir/HEEx source text. A rule a regex cannot express (a tag that
+  spans lines, a whole-file check, another language) is a `:custom`
+  detector: `check: &MyApp.Laws.f/2`, called as `check.(source, meta)` with
+  `meta` = `%{file:, lines:, diff?:}`, returning the lines it objects to as
+  line numbers or `%{line:, text:, hint:}` maps. It runs in `--diff` mode
+  too, receiving the diff text with `diff?: true`.
 - A law that belongs to some files only carries `paths` and/or `exclude`,
   lists of globs (`**` crosses directories, `*` and `?` stay within one,
   `{a,b}` is alternatives) matched against the judged file's path. In
