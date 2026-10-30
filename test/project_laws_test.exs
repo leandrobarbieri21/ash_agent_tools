@@ -1,0 +1,218 @@
+# SPDX-FileCopyrightText: 2026 ash_agent_tools contributors <https://github.com/lukegalea/ash_agent_tools>
+#
+# SPDX-License-Identifier: MIT
+
+defmodule AshAgentTools.ProjectLawsTest.UI do
+  @behaviour AshAgentTools.Laws.Source
+
+  @impl true
+  def laws do
+    [
+      %{
+        id: "ui-01",
+        name: "design-system-buttons",
+        category: :ui,
+        title: "Buttons come from the design system",
+        summary: "A raw <button> drifts from the design system; use <ds-button>.",
+        detectors: [
+          %{
+            kind: :line,
+            tier: :likely,
+            pattern: ~r/<button[\s>]/,
+            hint: "use <ds-button> instead of a raw <button>"
+          }
+        ]
+      },
+      %{
+        id: "ui-02",
+        name: "spacing-tokens",
+        category: :ui,
+        title: "Spacing comes from tokens",
+        summary: "Prefer spacing tokens over the raw Tailwind scale.",
+        detectors: [
+          %{kind: :line, tier: :review, pattern: ~r/\bgap-\d+\b/, hint: "use a spacing token"}
+        ]
+      },
+      %{
+        id: "ui-03",
+        name: "copy-is-reviewed",
+        category: :ui,
+        title: "UI copy is reviewed",
+        summary: "A behavioral rule with no detector.",
+        detectors: []
+      }
+    ]
+  end
+end
+
+defmodule AshAgentTools.ProjectLawsTest do
+  # Not async: one test sets the :extra_laws application env.
+  use ExUnit.Case, async: false
+
+  import ExUnit.CaptureIO
+
+  alias AshAgentTools.Laws
+  alias AshAgentTools.ProjectLawsTest.UI
+
+  @law %{
+    id: "ui-09",
+    name: "a-law",
+    category: :ui,
+    title: "A law",
+    summary: "A summary.",
+    detectors: [%{kind: :line, tier: :definite, pattern: ~r/forbidden/, hint: "don't"}]
+  }
+
+  describe "without project laws" do
+    test "the registry is the 26 core laws" do
+      assert Laws.laws() == Laws.core_laws()
+      assert length(Laws.laws()) == 26
+      assert Laws.project_laws() == []
+    end
+  end
+
+  describe "judge/2 with :extra_laws" do
+    test "a project law catches its pattern, reported like a core law" do
+      report = Laws.judge(~s|<button phx-click="go">Go</button>|, extra_laws: [UI])
+
+      assert report.laws_checked == 29
+      assert [violation] = report.violations
+
+      assert %{law: "ui-01", name: "design-system-buttons", category: :ui, tier: :likely} =
+               violation
+
+      assert violation.hint =~ "<ds-button>"
+      refute report.clean?
+    end
+
+    test "core laws still apply alongside project laws" do
+      report = Laws.judge("x = String.to_atom(input)\n<button>", extra_laws: [UI])
+      assert report.violations |> Enum.map(& &1.law) |> Enum.sort() == ["10", "ui-01"]
+    end
+
+    test "--law selection takes project ids; unknown ids still raise" do
+      report =
+        Laws.judge("x = String.to_atom(input)\n<button>", extra_laws: [UI], laws: ["ui-01"])
+
+      assert [%{law: "ui-01"}] = report.violations
+
+      assert_raise ArgumentError, ~r/ui-99/, fn ->
+        Laws.judge("x", extra_laws: [UI], laws: ["ui-99"])
+      end
+    end
+
+    test "the tier floor filters project laws and counts them" do
+      default = Laws.judge(~s|<div class="flex gap-3">|, extra_laws: [UI])
+      assert default.violations == []
+      assert default.counts.review == 1
+
+      review = Laws.judge(~s|<div class="flex gap-3">|, extra_laws: [UI], min_tier: :review)
+      assert [%{law: "ui-02", tier: :review}] = review.violations
+    end
+
+    test "diff mode judges only added lines for project laws too" do
+      diff = """
+      +++ b/lib/page.ex
+      @@ -1,2 +1,2 @@
+      -<button>old</button>
+      +<button>new</button>
+       <button>context</button>
+      """
+
+      report = Laws.judge(diff, extra_laws: [UI], diff?: true)
+      assert [%{law: "ui-01", line: 4}] = report.violations
+    end
+
+    test "a project law without detectors is in laws_without_detectors" do
+      report = Laws.judge("x", extra_laws: [UI])
+      assert %{id: "ui-03", name: "copy-is-reviewed"} in report.laws_without_detectors
+    end
+
+    test "law maps work as well as modules" do
+      assert [%{law: "ui-09"}] = Laws.judge("forbidden", extra_laws: [@law]).violations
+    end
+  end
+
+  describe "config :ash_agent_tools, :extra_laws" do
+    setup do
+      Application.put_env(:ash_agent_tools, :extra_laws, [UI])
+      on_exit(fn -> Application.delete_env(:ash_agent_tools, :extra_laws) end)
+    end
+
+    test "laws/0 and judge/2 pick them up; the option overrides the config" do
+      assert length(Laws.laws()) == 29
+      assert Enum.map(Laws.project_laws(), & &1.id) == ["ui-01", "ui-02", "ui-03"]
+      assert [%{law: "ui-01"}] = Laws.judge("<button>").violations
+      assert Laws.judge("<button>", extra_laws: []).violations == []
+    end
+
+    test "mix ash_agent.laws judges and lists them" do
+      judged =
+        capture_io(fn -> Mix.Tasks.AshAgent.Laws.run(["--code", "<button>Go</button>"]) end)
+
+      assert %{"violations" => [%{"law" => "ui-01"}]} = Jason.decode!(judged)
+
+      registry = Jason.decode!(capture_io(fn -> Mix.Tasks.AshAgent.Laws.run([]) end))
+      assert registry["count"] == 29
+      assert %{"id" => "ui-01", "project?" => true} = Enum.at(registry["laws"], 26)
+      assert Enum.all?(Enum.take(registry["laws"], 26), &(&1["project?"] == false))
+    end
+  end
+
+  describe "validation" do
+    test "a core id is rejected" do
+      assert_raise ArgumentError, ~r/"10" is a core iron law/, fn ->
+        Laws.project_laws(extra_laws: [%{@law | id: "10"}])
+      end
+    end
+
+    test "an empty id is rejected" do
+      assert_raise ArgumentError, ~r/must not be empty/, fn ->
+        Laws.project_laws(extra_laws: [%{@law | id: ""}])
+      end
+    end
+
+    test "numeric ids are reserved for the core numbering" do
+      assert_raise ArgumentError, ~r/"27" is reserved/, fn ->
+        Laws.project_laws(extra_laws: [%{@law | id: "27"}])
+      end
+    end
+
+    test "duplicate ids are rejected" do
+      assert_raise ArgumentError, ~r/duplicate project law id\(s\) \["ui-09"\]/, fn ->
+        Laws.project_laws(extra_laws: [@law, @law])
+      end
+    end
+
+    test "a detector missing its pattern is rejected" do
+      law = %{@law | detectors: [%{kind: :line, tier: :likely, hint: "h"}]}
+
+      assert_raise ArgumentError, ~r/:line detector of law "ui-09" needs :pattern/, fn ->
+        Laws.project_laws(extra_laws: [law])
+      end
+    end
+
+    test "an unknown detector kind or tier is rejected" do
+      for det <- [
+            %{kind: :ast, tier: :likely, pattern: ~r/x/, hint: "h"},
+            %{kind: :line, tier: :maybe, pattern: ~r/x/, hint: "h"}
+          ] do
+        assert_raise ArgumentError, ~r/invalid detector/, fn ->
+          Laws.project_laws(extra_laws: [%{@law | detectors: [det]}])
+        end
+      end
+    end
+
+    test "a law missing its title is rejected" do
+      assert_raise ArgumentError, ~r/needs a non-empty string :title/, fn ->
+        Laws.project_laws(extra_laws: [Map.delete(@law, :title)])
+      end
+    end
+
+    test "a module without laws/0 is rejected" do
+      assert_raise ArgumentError, ~r/exporting laws\/0/, fn ->
+        Laws.project_laws(extra_laws: [String])
+      end
+    end
+  end
+end

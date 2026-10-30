@@ -20,6 +20,11 @@ defmodule Mix.Tasks.AshAgent.Laws do
   compiled: the judge needs no project modules, so it is as cheap as
   `ash_agent.diff`. **stdout is pure JSON, always.**
 
+  **Project laws.** When `config :ash_agent_tools, :extra_laws` names modules
+  (see `AshAgentTools.Laws.Source`), their laws are judged, selected and
+  reported like the core 26. Those modules are the project's own code, so in
+  that case only the project is compiled first (quietly; still no boot).
+
   ## Usage
 
       mix ash_agent.laws                            # the law registry
@@ -88,6 +93,8 @@ defmodule Mix.Tasks.AshAgent.Laws do
   end
 
   defp dispatch(opts, positional) do
+    ensure_project_laws_loadable()
+
     cond do
       opts[:code] && positional != [] ->
         Mix.raise("Usage: pass either --code SNIPPET or file arguments, not both")
@@ -126,6 +133,16 @@ defmodule Mix.Tasks.AshAgent.Laws do
         aggregate(reports)
         |> Jason.encode!(pretty: !!opts[:pretty])
         |> AshAgentTools.TaskOutput.write_json(opts)
+    end
+  end
+
+  # Project laws live in the project's own modules, so the project is
+  # compiled only when some are configured; the core judge stays compile-free.
+  defp ensure_project_laws_loadable do
+    Mix.Task.run("loadconfig")
+
+    if Application.get_env(:ash_agent_tools, :extra_laws, []) != [] do
+      AshAgentTools.TaskOutput.ensure_compiled()
     end
   end
 
@@ -178,6 +195,7 @@ defmodule Mix.Tasks.AshAgent.Laws do
 
   defp registry_summary(opts) do
     laws = AshAgentTools.Laws.laws()
+    core_ids = Enum.map(AshAgentTools.Laws.core_laws(), & &1.id)
 
     %{
       count: length(laws),
@@ -191,7 +209,8 @@ defmodule Mix.Tasks.AshAgent.Laws do
             title: law.title,
             summary: law.summary,
             mechanical?: law.detectors != [],
-            detectors: length(law.detectors)
+            detectors: length(law.detectors),
+            project?: law.id not in core_ids
           }
         end)
     }

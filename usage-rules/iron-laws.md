@@ -44,6 +44,37 @@ always visible in `counts`. Seven laws are behavioral (see
 grep-tier, not a parser, so read a hit's `hint` and judge context (a
 compile-time-constant `String.to_atom` is the documented exception).
 
+## Project laws
+
+A project can add its own rules (its UI conventions, say) to the same judge
+instead of keeping a parallel lint task. They are judged, tiered, selected
+with `--law`, filtered by `--min-tier`, checked in `--diff` mode and reported
+exactly like the core laws:
+
+```elixir
+# config/config.exs
+config :ash_agent_tools, extra_laws: [MyAppWeb.Laws.UI]
+
+# a module implementing AshAgentTools.Laws.Source
+def laws do
+  [%{id: "ui-01", name: "design-system-buttons", category: :ui,
+     title: "Buttons come from the design system",
+     summary: "A raw <button> drifts from the design system; use <ds-button>.",
+     detectors: [%{kind: :line, tier: :likely, pattern: ~r/<button[\s>]/,
+                   hint: "use <ds-button> instead of a raw <button>"}]}]
+end
+```
+
+- The core numbering stays `01`–`26`. Project ids must not be all digits
+  and must be unique; use a prefix (`ui-01`). Invalid laws raise
+  `ArgumentError` naming the problem.
+- Detectors use the core kinds (`:line`, `:mount`, `:window`, `:file`) and
+  match Elixir/HEEx source text; other file types are out of scope.
+- `mix ash_agent.laws` compiles the project only when project laws are
+  configured (they are project modules); otherwise it stays compile-free.
+- `AshAgentTools.Laws.core_laws/0` is the core registry alone;
+  `AshAgentTools.Laws.laws/0` includes project laws.
+
 ## The laws
 
 ### LiveView

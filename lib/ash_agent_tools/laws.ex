@@ -38,6 +38,22 @@ defmodule AshAgentTools.Laws do
   `usage-rules/iron-laws.md` sub-rule so `mix usage_rules.sync` distributes
   it like any other agent rules file.
 
+  ## Project laws
+
+  A project can add its own laws (its UI conventions, say) and have them
+  judged, tiered, filtered and reported exactly like the core 26. Name one or
+  more modules implementing `AshAgentTools.Laws.Source` in config:
+
+      config :ash_agent_tools, extra_laws: [MyAppWeb.Laws.UI]
+
+  or pass them per call: `judge(source, extra_laws: [MyAppWeb.Laws.UI])`.
+  Each module's `laws/0` returns law maps in the registry's own shape (`id`,
+  `name`, `category`, `title`, `summary`, `detectors`) using the detector
+  kinds below. Project laws are validated when loaded: an id must not be all
+  digits — the numeric ids are the core numbering, now and later — and must
+  be unique; a malformed law or detector raises `ArgumentError` naming it.
+  Detectors match Elixir/HEEx source text, like the core ones.
+
   ## Examples
 
       iex> report = AshAgentTools.Laws.judge("def boom(x), do: String.to_atom(x)")
@@ -586,13 +602,42 @@ defmodule AshAgentTools.Laws do
     }
   ]
 
+  @core_ids Enum.map(@laws, & &1.id)
+  @detector_kinds [:line, :mount, :window, :file]
+
   @doc """
-  The codified law registry: all 26 iron laws with id, name, category,
-  title, summary, and detectors (empty for the behavior-only laws). Pure
-  data, sorted by id, never raises.
+  The law registry: the 26 iron laws with id, name, category, title,
+  summary, and detectors (empty for the behavior-only laws), followed by any
+  project laws (see "Project laws").
+
+  Project laws come from `opts[:extra_laws]` when given, otherwise from
+  `config :ash_agent_tools, :extra_laws`. With neither, this is the core
+  registry. Raises `ArgumentError` when a project law is invalid.
   """
-  @spec laws() :: [map()]
-  def laws, do: @laws
+  @spec laws(keyword()) :: [map()]
+  def laws(opts \\ []), do: @laws ++ project_laws(opts)
+
+  @doc """
+  The 26 core iron laws only, never project laws. Pure data, never raises.
+  """
+  @spec core_laws() :: [map()]
+  def core_laws, do: @laws
+
+  @doc """
+  The validated project laws from `opts[:extra_laws]`, or from
+  `config :ash_agent_tools, :extra_laws` when the option is absent. Entries
+  are modules implementing `AshAgentTools.Laws.Source` or law maps.
+  """
+  @spec project_laws(keyword()) :: [map()]
+  def project_laws(opts \\ []) do
+    opts
+    |> Keyword.get_lazy(:extra_laws, fn ->
+      Application.get_env(:ash_agent_tools, :extra_laws, [])
+    end)
+    |> List.wrap()
+    |> Enum.flat_map(&source_laws/1)
+    |> validate_project_laws!()
+  end
 
   @doc """
   The certainty tiers, most-certain first: `[:definite, :likely, :review]`.
@@ -614,6 +659,8 @@ defmodule AshAgentTools.Laws do
       are filtered out of `violations` (and still counted in `counts`)
     * `:laws` — list of law ids (e.g. `["10", "04"]`) restricting the
       judgement; unknown ids raise `ArgumentError` with the valid ids
+    * `:extra_laws` — project laws to judge with, overriding
+      `config :ash_agent_tools, :extra_laws` (see "Project laws")
     * `:diff?` — treat `source` as a unified diff and judge only added lines
       (`+` lines, `+++` headers excluded). Whole-text detectors (`:mount`,
       `:window`, `:file`) are skipped: they need full-file context, which a
@@ -627,7 +674,7 @@ defmodule AshAgentTools.Laws do
   @spec judge(String.t(), keyword()) :: map()
   def judge(source, opts \\ []) when is_binary(source) do
     min_tier = Keyword.get(opts, :min_tier, :likely)
-    selected = select_laws(opts[:laws])
+    selected = select_laws(opts[:laws], laws(opts))
     lines = String.split(source, ["\r\n", "\n"])
 
     raw_violations =
@@ -796,17 +843,142 @@ defmodule AshAgentTools.Laws do
 
   defp tier_rank(tier), do: Enum.find_index(@tiers, &(&1 == tier))
 
-  defp select_laws(nil), do: @laws
+  defp select_laws(nil, laws), do: laws
 
-  defp select_laws(ids) when is_list(ids) do
-    known_ids = Enum.map(@laws, & &1.id)
+  defp select_laws(ids, laws) when is_list(ids) do
+    known_ids = Enum.map(laws, & &1.id)
     unknown = Enum.reject(ids, &(&1 in known_ids))
 
     if unknown == [] do
-      Enum.filter(@laws, &(&1.id in ids))
+      Enum.filter(laws, &(&1.id in ids))
     else
       raise ArgumentError,
             "unknown law id(s) #{inspect(unknown)} — valid ids: #{Enum.join(known_ids, ", ")}"
     end
   end
+
+  # ── project laws ────────────────────────────────────────────────────────
+
+  defp source_laws(%{} = law), do: [law]
+
+  defp source_laws(module) when is_atom(module) do
+    if Code.ensure_loaded?(module) and function_exported?(module, :laws, 0) do
+      List.wrap(module.laws())
+    else
+      raise ArgumentError,
+            "extra_laws: #{inspect(module)} is not a loaded module exporting laws/0 " <>
+              "(implement AshAgentTools.Laws.Source)"
+    end
+  end
+
+  defp source_laws(other) do
+    raise ArgumentError,
+          "extra_laws: expected a module or a law map, got #{inspect(other)}"
+  end
+
+  defp validate_project_laws!(laws) do
+    Enum.each(laws, &validate_law!/1)
+
+    duplicates =
+      laws
+      |> Enum.frequencies_by(& &1.id)
+      |> Enum.filter(fn {_, n} -> n > 1 end)
+      |> Enum.map(&elem(&1, 0))
+
+    if duplicates != [] do
+      raise ArgumentError, "extra_laws: duplicate project law id(s) #{inspect(duplicates)}"
+    end
+
+    laws
+  end
+
+  defp validate_law!(%{id: id} = law) when is_binary(id) do
+    validate_id!(id)
+    validate_fields!(id, law)
+
+    case Map.get(law, :detectors) do
+      detectors when is_list(detectors) -> Enum.each(detectors, &validate_detector!(id, &1))
+      _ -> raise ArgumentError, "extra_laws: law #{inspect(id)} needs a :detectors list"
+    end
+  end
+
+  defp validate_law!(law) do
+    raise ArgumentError, "extra_laws: a law needs a string :id, got #{inspect(law)}"
+  end
+
+  defp validate_id!(""), do: raise(ArgumentError, "extra_laws: a law id must not be empty")
+
+  defp validate_id!(id) when id in @core_ids do
+    raise ArgumentError,
+          "extra_laws: law id #{inspect(id)} is a core iron law; " <>
+            "give project laws their own ids (e.g. \"ui-01\")"
+  end
+
+  defp validate_id!(id) do
+    if id =~ ~r/^\d+$/ do
+      raise ArgumentError,
+            "extra_laws: law id #{inspect(id)} is reserved — numeric ids are the core " <>
+              "numbering; use a prefix (e.g. \"ui-01\")"
+    end
+  end
+
+  defp validate_fields!(id, law) do
+    for key <- [:name, :title, :summary],
+        not (is_binary(Map.get(law, key)) and Map.get(law, key) != "") do
+      raise ArgumentError,
+            "extra_laws: law #{inspect(id)} needs a non-empty string #{inspect(key)}"
+    end
+
+    category = Map.get(law, :category)
+
+    unless is_atom(category) and not is_nil(category) do
+      raise ArgumentError, "extra_laws: law #{inspect(id)} needs an atom :category"
+    end
+  end
+
+  defp validate_detector!(id, %{kind: kind, tier: tier, hint: hint} = det)
+       when kind in @detector_kinds and tier in @tiers and is_binary(hint) do
+    missing =
+      case kind do
+        :line -> regex_keys(det, [:pattern]) ++ optional_regex(det, :unless_next)
+        :mount -> regex_keys(det, [:pattern]) ++ optional_regex(det, :guarded_by)
+        :window -> regex_keys(det, [:pattern]) ++ regex_list(det, :none) ++ window(det)
+        :file -> regex_list(det, :all, non_empty: true) ++ regex_list(det, :none)
+      end
+
+    if missing != [] do
+      raise ArgumentError,
+            "extra_laws: a #{inspect(kind)} detector of law #{inspect(id)} needs #{Enum.join(missing, ", ")}"
+    end
+  end
+
+  defp validate_detector!(id, det) do
+    raise ArgumentError,
+          "extra_laws: law #{inspect(id)} has an invalid detector #{inspect(det)} — needs " <>
+            ":kind (one of #{inspect(@detector_kinds)}), :tier (one of #{inspect(@tiers)}) " <>
+            "and a string :hint"
+  end
+
+  defp regex_keys(det, keys),
+    do: for(key <- keys, not is_struct(Map.get(det, key), Regex), do: "#{inspect(key)} (a regex)")
+
+  defp optional_regex(det, key) do
+    case Map.fetch(det, key) do
+      {:ok, value} when not is_struct(value, Regex) -> ["#{inspect(key)} to be a regex"]
+      _ -> []
+    end
+  end
+
+  defp regex_list(det, key, opts \\ []) do
+    value = Map.get(det, key)
+
+    valid? =
+      is_list(value) and Enum.all?(value, &is_struct(&1, Regex)) and
+        (value != [] or not Keyword.get(opts, :non_empty, false))
+
+    if valid?, do: [], else: ["#{inspect(key)} (a list of regexes)"]
+  end
+
+  defp window(%{window: n}) when is_integer(n) and n > 0, do: []
+  defp window(_), do: [":window (a positive integer)"]
 end
