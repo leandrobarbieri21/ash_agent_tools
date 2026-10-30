@@ -59,12 +59,11 @@ defmodule AshAgentTools.Laws.Comments do
   # heredoc or a multi-line HEEx/HTML comment, lines are emptied until the
   # closer; in code, a line may open either and is blanked from there.
   defp blank_line(line, :code) do
-    cond do
-      Regex.match?(@doc_heredoc, line) ->
-        [_, closer] = Regex.run(@doc_heredoc, line)
+    case Regex.run(@doc_heredoc, line) do
+      [_, closer] ->
         {"", {:heredoc, closer}}
 
-      true ->
+      nil ->
         without_inline = Regex.replace(@inline_comments, line, "")
 
         case opener(without_inline) do
